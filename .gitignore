@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.pyc
+
+# Data (IMPORTANT)
+data/raw/*
+data/processed/*
+
+# Notebooks checkpoints
+.ipynb_checkpoints/
+
+# OS files
+.DS_Store
