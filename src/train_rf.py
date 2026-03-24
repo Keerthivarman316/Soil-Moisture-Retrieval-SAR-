@@ -5,9 +5,9 @@ from sklearn.ensemble import RandomForestRegressor
 import joblib
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
-data_path = os.path.join(script_dir, "../data/Processed/Kaveri_Delta_Soil_Moisture.csv")
+data_path = os.path.join(script_dir, "../data/Processed/Global_Soil_Moisture.csv")
 models_dir = os.path.join(script_dir, "../models")
-model_path = os.path.join(models_dir, "random_forest_model.pkl")
+model_path = os.path.join(models_dir, "rf_global_model.pkl")
 
 os.makedirs(models_dir, exist_ok=True)
 

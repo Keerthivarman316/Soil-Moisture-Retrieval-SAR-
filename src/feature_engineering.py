@@ -3,16 +3,19 @@ import os
 import numpy as np
 from sklearn.preprocessing import StandardScaler
 import json
+import joblib
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 cleaned_dir = os.path.join(script_dir, "../data/Cleaned")
 cleaned_data_path = os.path.join(cleaned_dir, "Kaveri_Delta_Soil_Moisture.csv")
 
 processed_dir = os.path.join(script_dir, "../data/Processed")
+models_dir = os.path.join(script_dir, "../models")
 processed_data_path = os.path.join(processed_dir, "Kaveri_Delta_Soil_Moisture.csv")
 
 os.makedirs(processed_dir, exist_ok=True)
 os.makedirs(cleaned_dir, exist_ok=True)
+os.makedirs(models_dir, exist_ok=True)
 
 df = pd.read_csv(cleaned_data_path)
 
@@ -44,6 +47,9 @@ features_to_scale = [
 
 scaler = StandardScaler()
 df[features_to_scale] = scaler.fit_transform(df[features_to_scale])
+
+scaler_path = os.path.join(models_dir, "scaler.pkl")
+joblib.dump(scaler, scaler_path)
 
 df = df.drop(columns=['system:index', '.geo', 'date'])
 
