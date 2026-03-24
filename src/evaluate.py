@@ -11,7 +11,7 @@ data_path = os.path.join(script_dir, "../data/Processed/Kaveri_Delta_Soil_Moistu
 model_path = os.path.join(script_dir, "../models/random_forest_model.pkl")
 
 df = pd.read_csv(data_path)
-x = df[['VV', 'VH', 'NDVI', 'VV_VH_ratio', 'NDVI_VV']]
+x = df[['VV', 'VH', 'NDVI', 'VV_VH_ratio', 'NDVI_VV', 'month', 'DOY', 'lat', 'lon', 'SAR_Index', 'VV_VH_diff', 'VV_VH_sum', 'NDVI_VH']]
 y = df['soil_moisture']
 
 X_train, X_test, y_train, y_test = train_test_split(x, y, test_size=0.2, random_state=42)

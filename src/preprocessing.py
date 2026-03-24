@@ -9,7 +9,7 @@ cleaned_data_path = os.path.join(cleaned_dir, "Kaveri_Delta_Soil_Moisture.csv")
 os.makedirs(cleaned_dir, exist_ok=True)
 
 df = pd.read_csv(raw_data_path)
-df = df[['VV', 'VH', 'NDVI', 'soil_moisture']]
+df = df[['system:index', '.geo', 'VV', 'VH', 'NDVI', 'soil_moisture']]
 df = df.dropna()
 df = df[(df['soil_moisture'] >= 0) & (df['soil_moisture'] <= 1)]
 df.to_csv(cleaned_data_path, index=False)

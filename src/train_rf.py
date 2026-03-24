@@ -12,7 +12,7 @@ model_path = os.path.join(models_dir, "random_forest_model.pkl")
 os.makedirs(models_dir, exist_ok=True)
 
 df = pd.read_csv(data_path)
-x = df[['VV', 'VH', 'NDVI', 'VV_VH_ratio', 'NDVI_VV']]
+x = df[['VV', 'VH', 'NDVI', 'VV_VH_ratio', 'NDVI_VV', 'month', 'DOY', 'lat', 'lon', 'SAR_Index', 'VV_VH_diff', 'VV_VH_sum', 'NDVI_VH']]
 y = df['soil_moisture']
 
 X_train, X_test, y_train, y_test = train_test_split(x, y, test_size=0.2, random_state=42)
