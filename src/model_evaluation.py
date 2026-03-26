@@ -20,10 +20,9 @@ def evaluate_v4():
         return
 
     df_test = pd.read_csv(test_path)
-    X_test = df_test.drop(columns=['soil_moisture'])
+    X_test = df_test.drop(columns=['soil_moisture', 'region'])
     y_test = df_test['soil_moisture']
 
-    # Load All V4 Models
     print("Loading V4 Models (RF, XGB, LGBM, Ridge)...")
     rf_model = joblib.load(os.path.join(models_dir, "rf_model_v4.pkl"))
     xgb_model = joblib.load(os.path.join(models_dir, "xgb_model_v4.pkl"))
@@ -35,7 +34,6 @@ def evaluate_v4():
     y_pred_xgb = xgb_model.predict(X_test)
     y_pred_lgb = lgb_model.predict(X_test)
     
-    # Stacked Model Prediction
     meta_features = np.column_stack((y_pred_rf, y_pred_xgb, y_pred_lgb))
     y_pred_stacked = meta_learner.predict(meta_features)
 
@@ -56,7 +54,6 @@ def evaluate_v4():
     print("\nV4 Metrics Comparison (Held-out Test Split):")
     print(results_df.to_string(index=False))
 
-    # Save results to text file
     with open(os.path.join(results_dir, "v4_results.txt"), "w") as f:
         f.write("V4 Model Evaluation Results (Region-Aware)\n")
         f.write("=========================================\n")

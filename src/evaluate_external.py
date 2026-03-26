@@ -21,7 +21,6 @@ def evaluate_external_v4(file_path):
 
     df = pd.read_csv(file_path)
     
-    # 1. Preprocessing (V4 Columns)
     cols_v4 = ['Elevation', 'LST', 'NDVI', 'NDWI', 'Rainfall', 'VH', 'VV', 'soil_moisture', '.geo']
     df = df[cols_v4].dropna()
 
@@ -34,7 +33,6 @@ def evaluate_external_v4(file_path):
 
     df[['lat', 'lon']] = pd.DataFrame(df['.geo'].apply(extract_geo).tolist(), index=df.index)
     
-    # 2. V4 Feature Engineering
     df['Rainfall'] = np.log1p(df['Rainfall'])
     df['VV_VH_ratio'] = df['VV'] / (df['VH'] + 1e-6)
     df['SAR_Index'] = (df['VV'] - df['VH']) / (df['VV'] + df['VH'] + 1e-6)
@@ -50,13 +48,11 @@ def evaluate_external_v4(file_path):
         'NDWI_Rain', 'LST_NDVI', 'VV_NDWI', 'VH_NDVI', 'Rain_LST'
     ]
     
-    # 3. Scaling & Modeling Context
     models_dir = os.path.join(os.path.dirname(__file__), "../models")
     scalers_v4 = joblib.load(os.path.join(models_dir, "scalers_v4.pkl"))
     coord_scaler = joblib.load(os.path.join(models_dir, "coord_scaler_v4.pkl"))
     region_cols = joblib.load(os.path.join(models_dir, "region_cols_v4.pkl"))
 
-    # Global Coordinate Scaling
     df[['lat', 'lon']] = coord_scaler.transform(df[['lat', 'lon']])
 
     if region_name in scalers_v4:
@@ -70,19 +66,19 @@ def evaluate_external_v4(file_path):
     X_final = pd.DataFrame(X_scaled, columns=features_to_scale)
     X_final[['lat', 'lon']] = df[['lat', 'lon']].values
     
-    # 4. V4 One-Hot Encoding (Region-Aware Logic)
     for col in region_cols:
         target_name = f"region_{region_name}"
         X_final[col] = 1 if col == target_name else 0
 
     y_true = df['soil_moisture'].values
 
-    # 5. Load V4 Ensemble
     rf_model = joblib.load(os.path.join(models_dir, "rf_model_v4.pkl"))
     xgb_model = joblib.load(os.path.join(models_dir, "xgb_model_v4.pkl"))
     lgb_model = joblib.load(os.path.join(models_dir, "lgb_model_v4.pkl"))
     meta_learner = joblib.load(os.path.join(models_dir, "meta_learner_v4.pkl"))
     
+    X_final = X_final[features_to_scale + ['lat', 'lon'] + region_cols]
+
     y_pred_rf = rf_model.predict(X_final)
     y_pred_xgb = xgb_model.predict(X_final)
     y_pred_lgb = lgb_model.predict(X_final)
@@ -90,7 +86,6 @@ def evaluate_external_v4(file_path):
     meta_features = np.column_stack((y_pred_rf, y_pred_xgb, y_pred_lgb))
     y_pred_stacked = meta_learner.predict(meta_features)
 
-    # 6. Metrics & Visualization
     rmse = np.sqrt(mean_squared_error(y_true, y_pred_stacked))
     r2 = r2_score(y_true, y_pred_stacked)
     mae = mean_absolute_error(y_true, y_pred_stacked)

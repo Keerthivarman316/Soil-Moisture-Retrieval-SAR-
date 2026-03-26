@@ -1,7 +1,0 @@
-V4 Model Evaluation Results (Region-Aware)
-=========================================
-                Model     RMSE       R2      MAE
-   Random Forest (V4) 1.209394 0.880151 0.525064
-         XGBoost (V4) 1.296738 0.862214 0.717858
-        LightGBM (V4) 1.328913 0.855292 0.760239
-Stacked Ensemble (V4) 1.211099 0.879813 0.579750

@@ -24,16 +24,13 @@ def engineer_features_v4():
     os.makedirs(processed_dir, exist_ok=True)
 
     df = pd.read_csv(data_path)
-    
-    # 1. Coordinate Extraction
+
     if '.geo' in df.columns:
         df[['lat', 'lon']] = pd.DataFrame(df['.geo'].apply(extract_geo).tolist(), index=df.index)
         df.drop(columns=['.geo'], inplace=True)
 
-    # 2. Log Transformation for skewed features
     df['Rainfall'] = np.log1p(df['Rainfall'])
 
-    # 3. V4 Interaction Features
     print("Adding V4 interaction features...")
     df['VV_VH_ratio'] = df['VV'] / (df['VH'] + 1e-6)
     df['SAR_Index'] = (df['VV'] - df['VH']) / (df['VV'] + df['VH'] + 1e-6)
@@ -49,36 +46,34 @@ def engineer_features_v4():
         'NDWI_Rain', 'LST_NDVI', 'VV_NDWI', 'VH_NDVI', 'Rain_LST'
     ]
     
-    # 4. Global Scaling for Coordinates
     coord_scaler = MinMaxScaler()
     df[['lat', 'lon']] = coord_scaler.fit_transform(df[['lat', 'lon']])
     joblib.dump(coord_scaler, os.path.join(models_dir, "coord_scaler_v4.pkl"))
 
-    # 5. Region-wise Robust Normalization for physical features
     print("Applying region-wise Robust scaling...")
     scalers = {}
     for region in df['region'].unique():
-        scaler = RobustScaler()
-        mask = df['region'] == region
-        df.loc[mask, features_to_scale] = scaler.fit_transform(df.loc[mask, features_to_scale])
-        scalers[region] = scaler
+        region_mask = df['region'] == region
+        region_scaler = RobustScaler()
+        df.loc[region_mask, features_to_scale] = region_scaler.fit_transform(df.loc[region_mask, features_to_scale])
+        scalers[region] = region_scaler
+    
     joblib.dump(scalers, os.path.join(models_dir, "scalers_v4.pkl"))
 
-    # 6. One-Hot Encoding for Region (Region-Aware Learning)
-    print("Implementing One-Hot Encoding for regions...")
+    print("Applying One-Hot Encoding for Regions...")
     df_encoded = pd.get_dummies(df, columns=['region'], prefix='region', drop_first=False)
-    # Re-insert the original region for LORO splitting
-    df_encoded['region'] = df['region']
-    
     region_cols = [c for c in df_encoded.columns if c.startswith('region_')]
     joblib.dump(region_cols, os.path.join(models_dir, "region_cols_v4.pkl"))
 
-    # Select final features (including 'region' for metadata/grouping)
     final_features = features_to_scale + ['lat', 'lon'] + region_cols + ['region', 'soil_moisture']
     df_final = df_encoded[final_features]
 
+    from sklearn.model_selection import train_test_split
+    df_train, df_test = train_test_split(df_final, test_size=0.2, random_state=42)
+    
     df_final.to_csv(os.path.join(processed_dir, "V4_Final.csv"), index=False)
-    print(f"V4 Feature Engineering Complete! Processed data saved ({len(df_final)} samples).")
+    df_test.to_csv(os.path.join(processed_dir, "Test_Split_V4.csv"), index=False)
+    print(f"V4 Feature engineering complete. Region-Aware features saved.")
 
 if __name__ == "__main__":
     engineer_features_v4()
