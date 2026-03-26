@@ -1,0 +1,7 @@
+V3 Model Evaluation Results
+===========================
+                 Model     RMSE       R2      MAE
+    Random Forest (V3) 1.192793 0.883419 0.525228
+Gradient Boosting (V3) 1.414557 0.836039 0.796348
+              ANN (V3) 1.507297 0.813835 0.846774
+ Stacked Ensemble (V3) 1.185845 0.884773 0.528561
