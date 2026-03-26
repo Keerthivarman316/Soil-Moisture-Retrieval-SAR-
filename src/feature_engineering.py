@@ -15,7 +15,7 @@ def extract_geo(geo_str):
 from sklearn.preprocessing import RobustScaler, MinMaxScaler, LabelEncoder
 import joblib
 
-def engineer_features_v3():
+def engineer_features_v4():
     script_dir = os.path.dirname(os.path.abspath(__file__))
     data_path = os.path.join(script_dir, "../data/Cleaned/V3_Combined.csv")
     models_dir = os.path.join(script_dir, "../models")
@@ -31,53 +31,54 @@ def engineer_features_v3():
         df.drop(columns=['.geo'], inplace=True)
 
     # 2. Log Transformation for skewed features
-    print("Applying log transformation to Rainfall...")
     df['Rainfall'] = np.log1p(df['Rainfall'])
 
-    # 3. Derived SAR Features
+    # 3. V4 Interaction Features
+    print("Adding V4 interaction features...")
     df['VV_VH_ratio'] = df['VV'] / (df['VH'] + 1e-6)
     df['SAR_Index'] = (df['VV'] - df['VH']) / (df['VV'] + df['VH'] + 1e-6)
-    df['VV_VH_diff'] = df['VV'] - df['VH']
-    df['VV_VH_sum'] = df['VV'] + df['VH']
-    df['NDVI_VH'] = df['NDVI'] * df['VH']
-    df['NDWI_VH'] = df['NDWI'] * df['VH']
-    df['NDVI_NDWI_ratio'] = df['NDVI'] / (df['NDWI'] + 1e-6)
+    df['NDWI_Rain'] = df['NDWI'] * df['Rainfall']
+    df['LST_NDVI'] = df['LST'] * df['NDVI']
+    df['VV_NDWI'] = df['VV'] * df['NDWI']
+    df['VH_NDVI'] = df['VH'] * df['NDVI']
+    df['Rain_LST'] = df['Rainfall'] / (df['LST'] + 1.0)
 
     features_to_scale = [
         'Elevation', 'LST', 'NDVI', 'NDWI', 'Rainfall',
-        'VH', 'VV', 'VV_VH_ratio', 'SAR_Index', 'VV_VH_diff', 
-        'VV_VH_sum', 'NDVI_VH', 'NDWI_VH', 'NDVI_NDWI_ratio'
+        'VH', 'VV', 'VV_VH_ratio', 'SAR_Index', 
+        'NDWI_Rain', 'LST_NDVI', 'VV_NDWI', 'VH_NDVI', 'Rain_LST'
     ]
     
-    # 4. Global Scaling for Coordinates (Preserve relative spatial information)
-    print("Applying global scaling for coordinates...")
+    # 4. Global Scaling for Coordinates
     coord_scaler = MinMaxScaler()
     df[['lat', 'lon']] = coord_scaler.fit_transform(df[['lat', 'lon']])
-    joblib.dump(coord_scaler, os.path.join(models_dir, "coord_scaler_v3.pkl"))
+    joblib.dump(coord_scaler, os.path.join(models_dir, "coord_scaler_v4.pkl"))
 
-    # 5. Region-wise Robust Normalization
-    print("Applying region-wise Robust scaling (Median/IQR)...")
+    # 5. Region-wise Robust Normalization for physical features
+    print("Applying region-wise Robust scaling...")
     scalers = {}
     for region in df['region'].unique():
         scaler = RobustScaler()
         mask = df['region'] == region
         df.loc[mask, features_to_scale] = scaler.fit_transform(df.loc[mask, features_to_scale])
         scalers[region] = scaler
+    joblib.dump(scalers, os.path.join(models_dir, "scalers_v4.pkl"))
+
+    # 6. One-Hot Encoding for Region (Region-Aware Learning)
+    print("Implementing One-Hot Encoding for regions...")
+    df_encoded = pd.get_dummies(df, columns=['region'], prefix='region', drop_first=False)
+    # Re-insert the original region for LORO splitting
+    df_encoded['region'] = df['region']
     
-    # Save the dictionary of scalers
-    joblib.dump(scalers, os.path.join(models_dir, "scalers_v3.pkl"))
+    region_cols = [c for c in df_encoded.columns if c.startswith('region_')]
+    joblib.dump(region_cols, os.path.join(models_dir, "region_cols_v4.pkl"))
 
-    # 6. Label Encoding for Region
-    le = LabelEncoder()
-    df['region_encoded'] = le.fit_transform(df['region'])
-    joblib.dump(le, os.path.join(models_dir, "label_encoder_v3.pkl"))
+    # Select final features (including 'region' for metadata/grouping)
+    final_features = features_to_scale + ['lat', 'lon'] + region_cols + ['region', 'soil_moisture']
+    df_final = df_encoded[final_features]
 
-    # Select final features for training
-    final_features = features_to_scale + ['lat', 'lon', 'region_encoded', 'soil_moisture']
-    df_final = df[final_features]
-
-    df_final.to_csv(os.path.join(processed_dir, "V3_Final.csv"), index=False)
-    print(f"V3.1 Feature Engineering Complete! Processed data saved ({len(df_final)} samples).")
+    df_final.to_csv(os.path.join(processed_dir, "V4_Final.csv"), index=False)
+    print(f"V4 Feature Engineering Complete! Processed data saved ({len(df_final)} samples).")
 
 if __name__ == "__main__":
-    engineer_features_v3()
+    engineer_features_v4()

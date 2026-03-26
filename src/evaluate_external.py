@@ -3,38 +3,27 @@ import numpy as np
 import os
 import json
 import joblib
-import tensorflow as tf
+import xgboost as xgb
+import lightgbm as lgb
 import sys
 from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-import pandas as pd
-import numpy as np
-import os
-import json
-import joblib
-import tensorflow as tf
-import sys
-from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
-from sklearn.preprocessing import StandardScaler, RobustScaler, MinMaxScaler
-import matplotlib.pyplot as plt
-import seaborn as sns
-
-def evaluate_external_v3(file_path):
+def evaluate_external_v4(file_path):
     if not os.path.exists(file_path):
         print(f"Error: File {file_path} not found.")
         return
 
     name = os.path.basename(file_path)
     region_name = name.split('_')[0]
-    print(f"=== Evaluating External Dataset (V3): {name} [Region: {region_name}] ===")
+    print(f"=== V4 External Evaluation: {name} [Region: {region_name}] ===")
 
     df = pd.read_csv(file_path)
     
-    # 1. Preprocessing (V3 Columns)
-    cols_v3 = ['Elevation', 'LST', 'NDVI', 'NDWI', 'Rainfall', 'VH', 'VV', 'soil_moisture', '.geo']
-    df = df[cols_v3].dropna()
+    # 1. Preprocessing (V4 Columns)
+    cols_v4 = ['Elevation', 'LST', 'NDVI', 'NDWI', 'Rainfall', 'VH', 'VV', 'soil_moisture', '.geo']
+    df = df[cols_v4].dropna()
 
     def extract_geo(geo_str):
         try:
@@ -45,86 +34,82 @@ def evaluate_external_v3(file_path):
 
     df[['lat', 'lon']] = pd.DataFrame(df['.geo'].apply(extract_geo).tolist(), index=df.index)
     
-    # 2. Derived SAR Features
+    # 2. V4 Feature Engineering
     df['Rainfall'] = np.log1p(df['Rainfall'])
     df['VV_VH_ratio'] = df['VV'] / (df['VH'] + 1e-6)
     df['SAR_Index'] = (df['VV'] - df['VH']) / (df['VV'] + df['VH'] + 1e-6)
-    df['VV_VH_diff'] = df['VV'] - df['VH']
-    df['VV_VH_sum'] = df['VV'] + df['VH']
-    df['NDVI_VH'] = df['NDVI'] * df['VH']
-    df['NDWI_VH'] = df['NDWI'] * df['VH']
-    df['NDVI_NDWI_ratio'] = df['NDVI'] / (df['NDWI'] + 1e-6)
+    df['NDWI_Rain'] = df['NDWI'] * df['Rainfall']
+    df['LST_NDVI'] = df['LST'] * df['NDVI']
+    df['VV_NDWI'] = df['VV'] * df['NDWI']
+    df['VH_NDVI'] = df['VH'] * df['NDVI']
+    df['Rain_LST'] = df['Rainfall'] / (df['LST'] + 1.0)
 
     features_to_scale = [
         'Elevation', 'LST', 'NDVI', 'NDWI', 'Rainfall',
-        'VH', 'VV', 'VV_VH_ratio', 'SAR_Index', 'VV_VH_diff', 
-        'VV_VH_sum', 'NDVI_VH', 'NDWI_VH', 'NDVI_NDWI_ratio'
+        'VH', 'VV', 'VV_VH_ratio', 'SAR_Index', 
+        'NDWI_Rain', 'LST_NDVI', 'VV_NDWI', 'VH_NDVI', 'Rain_LST'
     ]
     
-    # 3. Scaling & Encoding
+    # 3. Scaling & Modeling Context
     models_dir = os.path.join(os.path.dirname(__file__), "../models")
-    scalers_v3 = joblib.load(os.path.join(models_dir, "scalers_v3.pkl"))
-    coord_scaler = joblib.load(os.path.join(models_dir, "coord_scaler_v3.pkl"))
-    le_v3 = joblib.load(os.path.join(models_dir, "label_encoder_v3.pkl"))
+    scalers_v4 = joblib.load(os.path.join(models_dir, "scalers_v4.pkl"))
+    coord_scaler = joblib.load(os.path.join(models_dir, "coord_scaler_v4.pkl"))
+    region_cols = joblib.load(os.path.join(models_dir, "region_cols_v4.pkl"))
 
     # Global Coordinate Scaling
     df[['lat', 'lon']] = coord_scaler.transform(df[['lat', 'lon']])
 
-    if region_name in scalers_v3:
-        print(f"-> [INFO] Using pre-trained Robust scaler for {region_name}")
-        X_scaled = scalers_v3[region_name].transform(df[features_to_scale])
-        region_encoded = le_v3.transform([region_name])[0]
+    if region_name in scalers_v4:
+        print(f"-> [INFO] Using known Robust scaler for {region_name}")
+        X_scaled = scalers_v4[region_name].transform(df[features_to_scale])
     else:
-        print(f"-> [WARNING] Region '{region_name}' not in training set. Calculating new Robust statistics...")
-        new_scaler = RobustScaler()
-        X_scaled = new_scaler.fit_transform(df[features_to_scale])
-        try:
-            region_encoded = le_v3.transform(['Kaveri'])[0]
-        except:
-            region_encoded = 0
+        print(f"-> [WARNING] Region '{region_name}' unknown. Using first available scaler for baseline.")
+        fallback_region = list(scalers_v4.keys())[0] 
+        X_scaled = scalers_v4[fallback_region].transform(df[features_to_scale])
 
     X_final = pd.DataFrame(X_scaled, columns=features_to_scale)
     X_final[['lat', 'lon']] = df[['lat', 'lon']].values
-    X_final['region_encoded'] = region_encoded
-    y = df['soil_moisture'].values
+    
+    # 4. V4 One-Hot Encoding (Region-Aware Logic)
+    for col in region_cols:
+        target_name = f"region_{region_name}"
+        X_final[col] = 1 if col == target_name else 0
 
-    # 4. Load Models and Predict
-    rf_model = joblib.load(os.path.join(models_dir, "rf_model_v3.pkl"))
-    gb_model = joblib.load(os.path.join(models_dir, "gb_model_v3.pkl"))
-    ann_model = tf.keras.models.load_model(os.path.join(models_dir, "ann_model_v3.keras"))
-    meta_learner = joblib.load(os.path.join(models_dir, "meta_learner_v3.pkl"))
+    y_true = df['soil_moisture'].values
+
+    # 5. Load V4 Ensemble
+    rf_model = joblib.load(os.path.join(models_dir, "rf_model_v4.pkl"))
+    xgb_model = joblib.load(os.path.join(models_dir, "xgb_model_v4.pkl"))
+    lgb_model = joblib.load(os.path.join(models_dir, "lgb_model_v4.pkl"))
+    meta_learner = joblib.load(os.path.join(models_dir, "meta_learner_v4.pkl"))
     
     y_pred_rf = rf_model.predict(X_final)
-    y_pred_gb = gb_model.predict(X_final)
-    y_pred_ann = ann_model.predict(X_final, verbose=0).flatten()
+    y_pred_xgb = xgb_model.predict(X_final)
+    y_pred_lgb = lgb_model.predict(X_final)
     
-    meta_features = np.column_stack((y_pred_rf, y_pred_gb, y_pred_ann))
+    meta_features = np.column_stack((y_pred_rf, y_pred_xgb, y_pred_lgb))
     y_pred_stacked = meta_learner.predict(meta_features)
 
-    # 5. Metrics
-    def get_metrics(y_true, y_pred, model_name):
-        rmse = np.sqrt(mean_squared_error(y_true, y_pred))
-        r2 = r2_score(y_true, y_pred)
-        mae = mean_absolute_error(y_true, y_pred)
-        return {"Model": model_name, "RMSE": round(rmse, 4), "R2": round(r2, 4), "MAE": round(mae, 4)}
+    # 6. Metrics & Visualization
+    rmse = np.sqrt(mean_squared_error(y_true, y_pred_stacked))
+    r2 = r2_score(y_true, y_pred_stacked)
+    mae = mean_absolute_error(y_true, y_pred_stacked)
 
-    results = [
-        get_metrics(y, y_pred_rf, "Random Forest (V3)"),
-        get_metrics(y, y_pred_gb, "Gradient Boosting (V3)"),
-        get_metrics(y, y_pred_ann, "ANN (V3)"),
-        get_metrics(y, y_pred_stacked, "Stacked Ensemble (V3)")
-    ]
-    
-    print(f"\nV3 Evaluation Results for {region_name}:")
-    print(pd.DataFrame(results).to_string(index=False))
+    print(f"\nV4 Stacked Results for {region_name}:")
+    print(f"RMSE: {rmse:.4f}")
+    print(f"R2:   {r2:.4f}")
+    print(f"MAE:  {mae:.4f}")
 
-    results_dir = os.path.join(os.path.dirname(__file__), "../results")
     plt.figure(figsize=(10, 6))
-    sns.regplot(x=y, y=y_pred_stacked, scatter_kws={'alpha': 0.3, 'color': 'purple'}, line_kws={'color': 'black'})
-    plt.title(f"{region_name} V3 Test: Actual vs Predicted (Stacked Model)\nRMSE: {results[3]['RMSE']}, R2: {results[3]['R2']}")
-    plt.savefig(os.path.join(results_dir, f"{region_name}_V3_Results.png"))
-    print(f"\nPlot saved to results/{region_name}_V3_Results.png")
+    sns.regplot(x=y_true, y=y_pred_stacked, scatter_kws={'alpha': 0.4, 'color': 'purple'})
+    plt.title(f"V4 Final Expansion: {region_name}\nR2: {r2:.4f}, RMSE: {rmse:.4f}")
+    plt.xlabel("Ground Truth Soil Moisture")
+    plt.ylabel("V4 Ensemble Prediction")
+    
+    results_dir = os.path.join(os.path.dirname(__file__), "../results")
+    plt.savefig(os.path.join(results_dir, f"{region_name}_V4_Results.png"))
+    print(f"Plot saved to results/{region_name}_V4_Results.png")
 
 if __name__ == "__main__":
     path = sys.argv[1] if len(sys.argv) > 1 else "data/Raw 2/WestBengal_TEST.csv"
-    evaluate_external_v3(path)
+    evaluate_external_v4(path)

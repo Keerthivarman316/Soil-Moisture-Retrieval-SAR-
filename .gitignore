@@ -3,7 +3,7 @@ __pycache__/
 *.pyc
 
 # Data (IMPORTANT)
-data/Raw2/*
+data/Raw 2/*
 data/Processed/*
 
 # Notebooks checkpoints
