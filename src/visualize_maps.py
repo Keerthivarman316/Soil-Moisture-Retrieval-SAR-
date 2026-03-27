@@ -15,11 +15,25 @@ def visualize_maps_v4(file_path, grid_resolution=100):
         return
 
     name = os.path.basename(file_path)
+    # Extract region name more robustly (e.g., 'Kaveri_FINAL.csv' -> 'Kaveri')
     region_name = name.split('_')[0]
-    print(f"=== V4 Spatial Mapping: {region_name} ===")
+    print(f"\n=== V4 Spatial Mapping: {region_name} [File: {name}] ===")
 
     df = pd.read_csv(file_path)
+    
+    # Handle both column naming conventions
+    if 'SAR_VH' in df.columns and 'VH' not in df.columns:
+        print("-> [INFO] Renaming SAR_VH/SAR_VV to VH/VV")
+        df = df.rename(columns={'SAR_VH': 'VH', 'SAR_VV': 'VV'})
+    
     cols_needed = ['Elevation', 'LST', 'NDVI', 'NDWI', 'Rainfall', 'VH', 'VV', 'soil_moisture', '.geo']
+    
+    # Check if all columns exist
+    missing = [c for c in cols_needed if c not in df.columns]
+    if missing:
+        print(f"-> [ERROR] Missing columns: {missing}")
+        return
+
     df = df[cols_needed].dropna()
 
     def extract_geo(geo_str):
@@ -29,15 +43,21 @@ def visualize_maps_v4(file_path, grid_resolution=100):
         except:
             return np.nan, np.nan
 
+    print("Extracting coordinates from GEE .geo column...")
     df[['lat', 'lon']] = pd.DataFrame(df['.geo'].apply(extract_geo).tolist(), index=df.index)
+    df = df.dropna(subset=['lat', 'lon'])
     
+    if df.empty:
+        print("-> [ERROR] No valid coordinates found after extraction.")
+        return
+
     lat_min, lat_max = df['lat'].min(), df['lat'].max()
     lon_min, lon_max = df['lon'].min(), df['lon'].max()
     
     grid_lat, grid_lon = np.mgrid[lat_min:lat_max:complex(grid_resolution), 
                                   lon_min:lon_max:complex(grid_resolution)]
     
-    print("Interpolating spatial grids...")
+    print(f"Interpolating spatial grids ({grid_resolution}x{grid_resolution})...")
     points = df[['lat', 'lon']].values
     
     grid_truth = griddata(points, df['soil_moisture'].values, (grid_lat, grid_lon), method='cubic')
@@ -72,12 +92,26 @@ def visualize_maps_v4(file_path, grid_resolution=100):
     ]
 
     models_dir = os.path.join(os.path.dirname(__file__), "../models")
-    scalers_v4 = joblib.load(os.path.join(models_dir, "scalers_v4.pkl"))
-    coord_scaler = joblib.load(os.path.join(models_dir, "coord_scaler_v4.pkl"))
-    region_cols = joblib.load(os.path.join(models_dir, "region_cols_v4.pkl"))
+    try:
+        scalers_v4 = joblib.load(os.path.join(models_dir, "scalers_v4.pkl"))
+        coord_scaler = joblib.load(os.path.join(models_dir, "coord_scaler_v4.pkl"))
+        region_cols = joblib.load(os.path.join(models_dir, "region_cols_v4.pkl"))
+        
+        rf = joblib.load(os.path.join(models_dir, "rf_model_v4.pkl"))
+        xgb_m = joblib.load(os.path.join(models_dir, "xgb_model_v4.pkl"))
+        lgb_m = joblib.load(os.path.join(models_dir, "lgb_model_v4.pkl"))
+        meta = joblib.load(os.path.join(models_dir, "meta_learner_v4.pkl"))
+    except Exception as e:
+        print(f"-> [ERROR] Failed to load models or scalers: {e}")
+        return
     
-    fallback_region = list(scalers_v4.keys())[0]
-    scaler = scalers_v4.get(region_name, scalers_v4[fallback_region])
+    # Selection of scaler
+    if region_name in scalers_v4:
+        scaler = scalers_v4[region_name]
+    else:
+        fallback_region = list(scalers_v4.keys())[0]
+        print(f"-> [WARNING] Region '{region_name}' not in scalers. Using {fallback_region} fallback.")
+        scaler = scalers_v4[fallback_region]
     
     X_scaled = scaler.transform(df_grid[features_to_scale])
     X_final = pd.DataFrame(X_scaled, columns=features_to_scale)
@@ -91,11 +125,6 @@ def visualize_maps_v4(file_path, grid_resolution=100):
         X_final[col] = 1 if col == target_name else 0
 
     print("Running ensemble inference on spatial grid...")
-    rf = joblib.load(os.path.join(models_dir, "rf_model_v4.pkl"))
-    xgb_m = joblib.load(os.path.join(models_dir, "xgb_model_v4.pkl"))
-    lgb_m = joblib.load(os.path.join(models_dir, "lgb_model_v4.pkl"))
-    meta = joblib.load(os.path.join(models_dir, "meta_learner_v4.pkl"))
-    
     X_final = X_final[features_to_scale + ['lat', 'lon'] + region_cols]
 
     p_rf = rf.predict(X_final)
@@ -131,11 +160,21 @@ def visualize_maps_v4(file_path, grid_resolution=100):
 
     plt.tight_layout()
     results_dir = os.path.join(os.path.dirname(__file__), "../results")
+    os.makedirs(results_dir, exist_ok=True)
     out_path = os.path.join(results_dir, f"{region_name}_V4_Map_Comparison.png")
     plt.savefig(out_path, dpi=300)
+    plt.close()
     print(f"Success! Map saved to {out_path}")
 
 if __name__ == "__main__":
     import sys
-    path = sys.argv[1] if len(sys.argv) > 1 else "data/Raw 2/WestBengal_TEST.csv"
-    visualize_maps_v4(path)
+    # Example: python src/visualize_maps.py data/Raw 2/Kaveri_FINAL.csv
+    if len(sys.argv) > 1:
+        visualize_maps_v4(sys.argv[1])
+    else:
+        # Default fallback
+        path = "data/Raw 2/WestBengal_TEST.csv"
+        if os.path.exists(path):
+            visualize_maps_v4(path)
+        else:
+            print("Usage: python src/visualize_maps.py <path_to_csv>")
